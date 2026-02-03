@@ -3,10 +3,6 @@ started as a simple balloon popping game for my toddler, evolving into a battle 
 
 
 
-Since we're building this as a **"Dad Science"** project with a specific **Scandi-Pinoy** (Viking-Bisaya) flavor, the README needs to be as professional as it is personality-driven. This document will explain the tech, the privacy, and the competitive "War Room" logic to anyone who finds your repo.
-
-Here is a detailed, GitHub-ready `README.md` based on our build.
-
 ---
 
 # 🎈 Bella's Balloons: AR Battle Edition 🛡️
@@ -49,7 +45,7 @@ The Battle HUD tracks your **BPM (Balloons Per Minute)** and accuracy to award t
 
 ## 🛠️ Installation & Setup
 
-1. **Clone the Repo:** `git clone https://github.com/YourUsername/BellasBalloons.git`
+1. **Clone the Repo:** `git clone https://github.com/jazgogmain-png/bellasballoons.git`
 2. **Open in Android Studio:** Ensure you have the latest Arctic Fox or Bumblebee+ version.
 3. **Sync Gradle:** Let the dependencies for CameraX and AppCompat load.
 4. **Run:** Deploy to a tablet (Landscape orientation recommended).
