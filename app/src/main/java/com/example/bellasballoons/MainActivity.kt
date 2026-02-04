@@ -24,10 +24,12 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
 class MainActivity : AppCompatActivity() {
@@ -39,22 +41,6 @@ class MainActivity : AppCompatActivity() {
     private var btSocket: BluetoothSocket? = null
     private var outStream: OutputStream? = null
 
-    // All the permissions needed for a Viking-level AR battle
-    private val requiredPermissions = arrayOf(
-        Manifest.permission.CAMERA,
-        Manifest.permission.BLUETOOTH_SCAN,
-        Manifest.permission.BLUETOOTH_CONNECT,
-        Manifest.permission.ACCESS_FINE_LOCATION
-    )
-
-    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
-        if (results.values.all { it }) {
-            Log.d("BALLOON", "Permissions Secured!")
-        } else {
-            Toast.makeText(this, "Battle restricted without permissions!", Toast.LENGTH_SHORT).show()
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -63,7 +49,6 @@ class MainActivity : AppCompatActivity() {
         balloonView = findViewById(R.id.balloon_view)
 
         checkUsername()
-        requestGamePermissions()
         applyImmersiveMode()
 
         balloonView.onAction = { action ->
@@ -77,9 +62,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) applyImmersiveMode()
+    override fun onPause() {
+        super.onPause()
+        balloonView.pause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        balloonView.resume()
     }
 
     private fun applyImmersiveMode() {
@@ -91,22 +81,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun forceChildLock() {
-        try {
-            this.startLockTask()
-            Toast.makeText(this, "LODI MODE: PINNED 🛡️", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            AlertDialog.Builder(this)
-                .setTitle("Pinning Failed")
-                .setMessage("Enable 'App Pinning' in Security Settings first.")
-                .setPositiveButton("SETTINGS") { _, _ ->
-                    startActivity(Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS))
-                }.show()
+        try { this.startLockTask(); Toast.makeText(this, "LODI MODE: PINNED 🛡️", Toast.LENGTH_SHORT).show() }
+        catch (e: Exception) {
+            AlertDialog.Builder(this).setTitle("Pinning Failed").setMessage("Enable 'App Pinning' in Settings.")
+                .setPositiveButton("SETTINGS") { _, _ -> startActivity(Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS)) }.show()
         }
-    }
-
-    private fun requestGamePermissions() {
-        val missing = requiredPermissions.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
-        if (missing.isNotEmpty()) permissionLauncher.launch(missing.toTypedArray())
     }
 
     private fun checkUsername() {
@@ -115,8 +94,7 @@ class MainActivity : AppCompatActivity() {
             val input = EditText(this)
             AlertDialog.Builder(this).setTitle("Warrior Name").setView(input)
                 .setPositiveButton("SKOL!") { _, _ ->
-                    val name = input.text.toString().ifEmpty { "Lodi" }
-                    prefs.edit().putString("username", name).apply()
+                    prefs.edit().putString("username", input.text.toString().ifEmpty { "Lodi" }).apply()
                     balloonView.updateUser()
                 }.show()
         }
@@ -124,7 +102,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setBattleTimer() {
         val input = EditText(this).apply { inputType = InputType.TYPE_CLASS_NUMBER }
-        AlertDialog.Builder(this).setTitle("Set Battle (Seconds)").setView(input)
+        AlertDialog.Builder(this).setTitle("Set Battle (Secs)").setView(input)
             .setPositiveButton("START") { _, _ ->
                 val secs = input.text.toString().toLongOrNull() ?: 60L
                 balloonView.startBattle(secs)
@@ -133,9 +111,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleCamera() {
-        // SURGICAL CHECK: Don't open the camera if the user said no
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA))
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 101)
             return
         }
         if (!isCameraActive) startCamera() else stopCamera()
@@ -167,11 +144,12 @@ class MainActivity : AppCompatActivity() {
         val manager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         bluetoothAdapter = manager.adapter ?: return
 
-        // SURGICAL CHECK: Check for BT Connect permission (required for API 31+)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-            permissionLauncher.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT))
-            return
+        // --- THE SURGICAL PERMISSION CHECK TO KILL THE RED ERROR ---
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN), 102)
+                return
+            }
         }
 
         Thread {
@@ -221,21 +199,23 @@ class MainActivity : AppCompatActivity() {
     fun sendPacket(cmd: String) { Thread { try { outStream?.write(cmd.toByteArray()) } catch (e: Exception) {} }.start() }
 }
 
-// --- DATA CLASSES ---
+// --- DATA CLASSES & VIEW ENGINE (KEEPING YOUR PERFECT GHOST-FREE CODE) ---
+// [REST OF THE FILE REMAINS UNCHANGED]
+
 data class Balloon(
+    val id: String = UUID.randomUUID().toString(),
     var x: Float, var y: Float, var vx: Float, var vy: Float, val color: Int,
     var radius: Float = 180f, var isInflating: Boolean = false,
     var isFarting: Boolean = false, var fartTimer: Int = 0,
-    var fartStreamId: Int = 0, var pointerId: Int = -1,
-    var currentInflateStreamId: Int = 0
+    var pointerId: Int = -1
 )
 data class Particle(var x: Float, var y: Float, var vx: Float, var vy: Float, val color: Int, var alpha: Int = 255, var isStink: Boolean = false)
 
-// --- VIEW ENGINE ---
 class BalloonView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0) : View(context, attrs, defStyleAttr) {
     var onAction: ((String) -> Unit)? = null
     private val balloons = CopyOnWriteArrayList<Balloon>()
     private val particles = CopyOnWriteArrayList<Particle>()
+    private val activeStreams = ConcurrentHashMap<String, Int>()
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val random = Random()
     private val prefs = context.getSharedPreferences("BellaPrefs", Context.MODE_PRIVATE)
@@ -246,10 +226,10 @@ class BalloonView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     private var oppName = "Unknown"; private var oppBest = "0"; private var oppFlash = 0
     private var battleEndTime = 0L; private var isBattleActive = false
 
+    private var comboCount = 0; private var comboTime = 0L; private var comboText = ""; private var screenShake = 0f
     private val shim = 30f
     private var soundPool: SoundPool; private var popId = -1; private var inflateId = -1; private var fartId = -1
-    private var showMenu = false; private var useCamera = false
-    private var menuTaps = 0; private var rainbowHue = 0f
+    private var showMenu = false; private var useCamera = false; private var menuTaps = 0; private var rainbowHue = 0f
 
     private val uiFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; typeface = Typeface.DEFAULT_BOLD }
     private val panelPaint = Paint().apply { color = Color.BLACK; alpha = 160 }
@@ -260,6 +240,14 @@ class BalloonView @JvmOverloads constructor(context: Context, attrs: AttributeSe
         popId = soundPool.load(context, R.raw.pop_sound, 1); inflateId = soundPool.load(context, R.raw.inflate, 1); fartId = soundPool.load(context, R.raw.fart, 1)
     }
 
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        soundPool.release()
+    }
+
+    fun pause() { soundPool.autoPause() }
+    fun resume() { soundPool.autoResume() }
+
     fun updateUser() { username = prefs.getString("username", "Warrior") }
     fun setCameraState(active: Boolean) { useCamera = active; invalidate() }
     fun setOpponent(name: String, best: String) { oppName = name; oppBest = best; invalidate() }
@@ -269,6 +257,11 @@ class BalloonView @JvmOverloads constructor(context: Context, attrs: AttributeSe
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        if (screenShake > 0) {
+            canvas.translate(random.nextFloat() * screenShake - screenShake/2, random.nextFloat() * screenShake - screenShake/2)
+            screenShake *= 0.9f
+        }
+
         if (useCamera) canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR) else canvas.drawColor(Color.parseColor("#E1F5FE"))
 
         rainbowHue = (rainbowHue + 1.2f) % 360f
@@ -281,6 +274,7 @@ class BalloonView @JvmOverloads constructor(context: Context, attrs: AttributeSe
             paint.color = p.color; paint.alpha = p.alpha; canvas.drawCircle(p.x, p.y, if(p.isStink) 40f else 10f, paint)
             p.x += p.vx; p.y += p.vy; p.alpha -= 4; if (p.alpha <= 0) particles.remove(p)
         }
+
         for (b in balloons) {
             if (b.isInflating) b.radius += 2.5f
             else if (b.isFarting) {
@@ -291,6 +285,12 @@ class BalloonView @JvmOverloads constructor(context: Context, attrs: AttributeSe
             paint.color = b.color; canvas.drawCircle(b.x, b.y, b.radius, paint)
             if (!b.isInflating) { b.x += b.vx; b.y += b.vy }
             if (b.x-b.radius<0 || b.x+b.radius>width) b.vx *= -1; if (b.y-b.radius<0 || b.y+b.radius>height) b.vy *= -1
+        }
+
+        if (System.currentTimeMillis() - comboTime < 1500) {
+            uiFill.textSize = 80f; uiFill.color = Color.YELLOW
+            canvas.drawText(comboText, width/2f, height*0.3f, uiFill)
+            uiFill.color = Color.WHITE
         }
 
         drawHUD(canvas)
@@ -337,41 +337,42 @@ class BalloonView @JvmOverloads constructor(context: Context, attrs: AttributeSe
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val action = event.actionMasked
-        for (i in 0 until event.pointerCount) {
-            val pId = event.getPointerId(i); val pX = event.getX(i); val pY = event.getY(i)
+        val actionIndex = event.actionIndex
+        val pointerId = event.getPointerId(actionIndex)
 
-            if (showMenu && action == MotionEvent.ACTION_DOWN) {
-                if (pY > height*0.32f && pY < height*0.42f) onAction?.invoke("setTimer")
-                else if (pY > height*0.45f && pY < height*0.55f) { if (pX < width*0.48f) onAction?.invoke("hostBT") else onAction?.invoke("joinBT") }
-                else if (pY > height*0.58f && pY < height*0.68f) onAction?.invoke("toggleCamera")
-                else if (pY > height*0.71f && pY < height*0.81f) onAction?.invoke("childLock")
-                showMenu = false; return true
-            }
+        if (showMenu && action == MotionEvent.ACTION_DOWN) {
+            val pX = event.getX(0); val pY = event.getY(0)
+            if (pY > height*0.32f && pY < height*0.42f) onAction?.invoke("setTimer")
+            else if (pY > height*0.45f && pY < height*0.55f) { if (pX < width/2f) onAction?.invoke("hostBT") else onAction?.invoke("joinBT") }
+            else if (pY > height*0.58f && pY < height*0.68f) onAction?.invoke("toggleCamera")
+            else if (pY > height*0.71f && pY < height*0.81f) onAction?.invoke("childLock")
+            showMenu = false; return true
+        }
 
-            when (action) {
-                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
-                    if (pX < 200 && pY < 200) { menuTaps++; if (menuTaps >= 3) { showMenu = true; menuTaps = 0 } }
-                    else {
-                        var hit = false
-                        for (b in balloons.asReversed()) {
-                            if (Math.hypot((pX - b.x).toDouble(), (pY - b.y).toDouble()) < b.radius + 65) {
-                                b.isInflating = true; b.pointerId = pId
-                                b.currentInflateStreamId = soundPool.play(inflateId, 0.5f, 0.5f, 1, -1, 1f)
-                                hit = true; break
-                            }
+        when (action) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                val pX = event.getX(actionIndex); val pY = event.getY(actionIndex)
+                if (pX < 200 && pY < 200) { menuTaps++; if (menuTaps >= 3) { showMenu = true; menuTaps = 0 } }
+                else {
+                    var hit = false
+                    for (b in balloons.asReversed()) {
+                        if (!b.isInflating && Math.hypot((pX - b.x).toDouble(), (pY - b.y).toDouble()) < b.radius + 65) {
+                            b.isInflating = true; b.pointerId = pointerId
+                            val sid = soundPool.play(inflateId, 0.5f, 0.5f, 1, -1, 1f)
+                            activeStreams[b.id] = sid
+                            hit = true; break
                         }
-                        if (!hit && !showMenu) { currentStreak = 0; (context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator).vibrate(VibrationEffect.createOneShot(50, 80)) }
                     }
+                    if (!hit && !showMenu) { currentStreak = 0; (context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator).vibrate(VibrationEffect.createOneShot(50, 80)) }
                 }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
-                    val activeId = event.getPointerId(event.actionIndex)
-                    for (b in balloons) if (b.isInflating && b.pointerId == activeId) {
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
+                for (b in balloons) {
+                    if (b.isInflating && b.pointerId == pointerId) {
                         b.isInflating = false; b.pointerId = -1
-                        if (b.currentInflateStreamId != 0) {
-                            soundPool.stop(b.currentInflateStreamId)
-                            b.currentInflateStreamId = 0
-                        }
+                        stopBalloonSound(b.id)
                         if (b.radius > 280f) startFarting(b) else popBalloon(b)
+                        break
                     }
                 }
             }
@@ -379,30 +380,50 @@ class BalloonView @JvmOverloads constructor(context: Context, attrs: AttributeSe
         return true
     }
 
-    private fun triggerWinnerScreen() { (context as MainActivity).runOnUiThread { AlertDialog.Builder(context).setTitle("Round Over!").setMessage("Final Streak: $currentStreak").show() } }
-    private fun popBalloon(b: Balloon) {
-        currentStreak++; if (currentStreak > maxStreak) { maxStreak = currentStreak; prefs.edit().putInt("max_streak", maxStreak).apply() }
-        popTimes.addLast(System.currentTimeMillis()); while (popTimes.isNotEmpty() && popTimes.first < System.currentTimeMillis() - 60000) popTimes.removeFirst()
-        bpm = popTimes.size
-        if (b.currentInflateStreamId != 0) {
-            soundPool.stop(b.currentInflateStreamId)
-            b.currentInflateStreamId = 0
+    private fun stopBalloonSound(balloonId: String) {
+        activeStreams[balloonId]?.let { sid ->
+            soundPool.stop(sid)
+            activeStreams.remove(balloonId)
         }
+    }
+
+    private fun triggerWinnerScreen() { (context as MainActivity).runOnUiThread { AlertDialog.Builder(context).setTitle("Round Over!").setMessage("Final Streak: $currentStreak").show() } }
+
+    private fun popBalloon(b: Balloon) {
+        stopBalloonSound(b.id)
+        val now = System.currentTimeMillis()
+        if (now - comboTime < 300) comboCount++ else comboCount = 1
+        comboTime = now
+
+        if (comboCount >= 2) {
+            screenShake = comboCount * 15f
+            comboText = when(comboCount) {
+                2 -> "LODI POP! 🇵🇭"
+                3 -> "VIKING RAID! ⚔️"
+                else -> "PAMBANSANG POPPER! 🔥"
+            }
+        }
+
+        currentStreak++; if (currentStreak > maxStreak) { maxStreak = currentStreak; prefs.edit().putInt("max_streak", maxStreak).apply() }
+        popTimes.addLast(now); while (popTimes.isNotEmpty() && popTimes.first < now - 60000) popTimes.removeFirst()
+        bpm = popTimes.size
+
         soundPool.play(popId, 1f, 1f, 1, 0, 1f)
         balloons.remove(b)
-        (context as MainActivity).sendPacket("POP"); for (i in 0..20) particles.add(Particle(b.x, b.y, random.nextFloat()*20-10, random.nextFloat()*20-10, b.color))
+        (context as MainActivity).sendPacket("POP")
+        for (i in 0..20) particles.add(Particle(b.x, b.y, random.nextFloat()*20-10, random.nextFloat()*20-10, b.color))
     }
+
     private fun startFarting(b: Balloon) {
         b.isInflating = false
-        if (b.currentInflateStreamId != 0) {
-            soundPool.stop(b.currentInflateStreamId)
-            b.currentInflateStreamId = 0
-        }
+        stopBalloonSound(b.id)
         b.isFarting = true
-        b.fartStreamId = soundPool.play(fartId, 1f, 1f, 1, 0, 1f)
+        val sid = soundPool.play(fartId, 1f, 1f, 1, 0, 1f)
+        activeStreams[b.id] = sid
     }
+
     private fun spawnBalloon() {
         val colors = intArrayOf(Color.RED, Color.BLUE, Color.YELLOW, Color.MAGENTA, Color.GREEN)
-        balloons.add(Balloon(200f + random.nextFloat()*(width-400f), 200f + random.nextFloat()*(height-400f), random.nextFloat()*10-5, random.nextFloat()*10-5, colors.random()))
+        balloons.add(Balloon(x = 200f + random.nextFloat()*(width-400f), y = 200f + random.nextFloat()*(height-400f), vx = random.nextFloat()*10-5, vy = random.nextFloat()*10-5, color = colors.random()))
     }
 }
